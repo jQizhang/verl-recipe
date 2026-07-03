@@ -202,6 +202,26 @@ class RayDAPOTrainer(RayPPOTrainer):
                     new_batch = new_batch.repeat(repeat_times=self.config.actor_rollout_ref.rollout.n, interleave=True)
                     new_batch = new_batch.union(gen_batch_output)
 
+                    # Print one random rollout sample (prompt + response) for inspection.
+                    try:
+                        _sample_idx = int(np.random.randint(0, len(new_batch.batch)))
+                        _prompt_txt = self.tokenizer.decode(
+                            new_batch.batch["prompts"][_sample_idx], skip_special_tokens=True
+                        )
+                        _resp_txt = self.tokenizer.decode(
+                            new_batch.batch["responses"][_sample_idx], skip_special_tokens=True
+                        )
+                        print(
+                            f"\n========== [rollout sample @ step {self.global_steps}, idx {_sample_idx}/"
+                            f"{len(new_batch.batch)}] ==========\n"
+                            f"[PROMPT]\n{_prompt_txt}\n"
+                            f"[RESPONSE]\n{_resp_txt}\n"
+                            f"=================================================================\n",
+                            flush=True,
+                        )
+                    except Exception as _e:
+                        print(f"[rollout sample] failed to print sample: {_e}", flush=True)
+
                     if self.config.algorithm.use_kl_in_reward:
                         # We need these metrics for apply_kl_penalty if using kl in reward
                         new_batch = self.compute_kl_related_metrics(new_batch, metrics, timing_raw)
