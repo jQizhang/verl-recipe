@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 set -xeuo pipefail
 
-# End-to-end MXFP8 test:
+# End-to-end MXFP8:
 #   - Training side (actor / Megatron + Transformer Engine): MXFP8
 #   - Rollout side (SGLang): MXFP8
 
-ID=${1:-"dapo-qwen3-30b-megatron-sglang-mxfp8-e2e-8k"}
+ID=${1:-"dapo-qwen3-30b-megatron-sglang-mxfp8-e2e-20k"}
 HOME_DIR=/apps
 
 project_name=${PROJECT_NAME:-VERL-MXFP8-RL}
@@ -39,7 +39,7 @@ rollout_rs_threshold_lower=null
 rollout_token_veto_threshold=null
 
 max_prompt_length=$((1024 * 2))
-max_response_length=$((1024 * 8))
+max_response_length=$((1024 * 20))
 enable_overlong_buffer=True
 overlong_buffer_len=512
 overlong_penalty_factor=1.0
@@ -54,7 +54,7 @@ gen_prompt_bsz=96
 n_resp_per_prompt=16
 train_prompt_mini_bsz=32
 
-RAY_ADDRESS="http://127.0.0.1:8265"
+RAY_ADDRESS=${RAY_ADDRESS:-"http://127.0.0.1:8265"}
 WORKING_DIR=${WORKING_DIR:-"${PWD}"}
 RUNTIME_ENV=${RUNTIME_ENV:-"${WORKING_DIR}/verl/trainer/runtime_env.yaml"}
 NNODES=${NNODES:-1}
@@ -97,6 +97,7 @@ train_ep=8
 train_etp=1
 train_cp=1
 
+################################################### start of config ###################################################
 
 DATA=(
     data.train_files="${TRAIN_FILE}"
@@ -166,6 +167,7 @@ ACTOR=(
     actor_rollout_ref.actor.optim.clip_grad=1.0
     +actor_rollout_ref.actor.megatron.override_transformer_config.moe_permute_fusion=False
     actor_rollout_ref.actor.megatron.override_transformer_config.attention_backend='fused'
+    actor_rollout_ref.actor.optim.use_checkpoint_opt_param_scheduler=True
     actor_rollout_ref.actor.loss_agg_mode=${loss_agg_mode}
     actor_rollout_ref.actor.megatron.tensor_model_parallel_size=${train_tp}
     actor_rollout_ref.actor.megatron.pipeline_model_parallel_size=${train_pp}

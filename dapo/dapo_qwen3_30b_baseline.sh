@@ -50,10 +50,10 @@ gen_prompt_bsz=96
 n_resp_per_prompt=16
 train_prompt_mini_bsz=32
 
-RAY_ADDRESS="http://127.0.0.1:8265"
+RAY_ADDRESS=${RAY_ADDRESS:-"http://127.0.0.1:8265"}
 WORKING_DIR=${WORKING_DIR:-"${PWD}"}
 RUNTIME_ENV=${RUNTIME_ENV:-"${WORKING_DIR}/verl/trainer/runtime_env.yaml"}
-NNODES=${NNODES:-4}
+NNODES=${NNODES:-1}
 # Paths
 RAY_DATA_HOME=${RAY_DATA_HOME:-"${HOME_DIR}"}
 MODEL_PATH=/apps/models/Qwen3-30B-A3B-Base
@@ -144,6 +144,7 @@ ACTOR=(
     actor_rollout_ref.actor.optim.clip_grad=1.0
     +actor_rollout_ref.actor.megatron.override_transformer_config.moe_permute_fusion=False
     actor_rollout_ref.actor.megatron.override_transformer_config.attention_backend='fused'
+    actor_rollout_ref.actor.optim.use_checkpoint_opt_param_scheduler=True
     actor_rollout_ref.actor.loss_agg_mode=${loss_agg_mode}
     actor_rollout_ref.actor.megatron.tensor_model_parallel_size=${train_tp}
     actor_rollout_ref.actor.megatron.pipeline_model_parallel_size=${train_pp}
@@ -169,6 +170,7 @@ ROLLOUT=(
     actor_rollout_ref.rollout.val_kwargs.n=1
     actor_rollout_ref.rollout.name=${rollout_name}
     actor_rollout_ref.rollout.enforce_eager=False
+    +actor_rollout_ref.rollout.engine_kwargs.sglang.moe_runner_backend=triton
 )
 
 FORWARD_ONLY_SETS=(
