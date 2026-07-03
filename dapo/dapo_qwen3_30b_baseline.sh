@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -xeuo pipefail
 
-ID=${1:-"dapo-qwen3-30b-megatron-sglang-baseline-8k"}
+ID=${1:-"dapo-qwen3-30b-megatron-sglang-baseline-20k"}
 HOME_DIR=/apps
 
 project_name=${PROJECT_NAME:-VERL-MXFP8-RL}
@@ -35,22 +35,22 @@ rollout_rs_threshold_lower=null
 rollout_token_veto_threshold=null
 
 max_prompt_length=$((1024 * 2))
-max_response_length=$((1024 * 8))
+max_response_length=$((1024 * 20))
 enable_overlong_buffer=True
 overlong_buffer_len=512
 overlong_penalty_factor=1.0
 
 loss_agg_mode="token-mean"
 
-enable_filter_groups=${ENABLE_FILTER_GROUPS:-True}
-filter_groups_metric=${FILTER_GROUPS_METRIC:-acc}
-max_num_gen_batches=${MAX_NUM_GEN_BATCHES:-10}
-train_prompt_bsz=${TRAIN_PROMPT_BSZ:-32}
-gen_prompt_bsz=${GEN_PROMPT_BSZ:-96}
-n_resp_per_prompt=${N_RESP_PER_PROMPT:-16}
-train_prompt_mini_bsz=${TRAIN_PROMPT_MINI_BSZ:-32}
+enable_filter_groups=True
+filter_groups_metric=acc
+max_num_gen_batches=10
+train_prompt_bsz=32
+gen_prompt_bsz=96
+n_resp_per_prompt=16
+train_prompt_mini_bsz=32
 
-RAY_ADDRESS=${RAY_ADDRESS:-"http://127.0.0.1:8265"}
+RAY_ADDRESS="http://127.0.0.1:8265"
 WORKING_DIR=${WORKING_DIR:-"${PWD}"}
 RUNTIME_ENV=${RUNTIME_ENV:-"${WORKING_DIR}/verl/trainer/runtime_env.yaml"}
 NNODES=${NNODES:-4}
@@ -71,24 +71,15 @@ val_top_p=1.0
 use_dynamic_bsz=True
 actor_ppo_max_token_len=$((max_prompt_length + max_response_length))
 infer_ppo_max_token_len=$((max_prompt_length + max_response_length))
-offload=True
+offload=true
 gen_tp=1
 actor_lr_warmup_steps=10
-rollout_max_num_batched_tokens=$((1024 * 16))
-rollout_enforce_eager=${ROLLOUT_ENFORCE_EAGER:-True}
-trainer_logger=${TRAINER_LOGGER:-'["console","wandb"]'}
-trainer_val_before_train=${TRAINER_VAL_BEFORE_TRAIN:-False}
-trainer_test_freq=${TRAINER_TEST_FREQ:-10}
-trainer_save_freq=${TRAINER_SAVE_FREQ:-5}
-trainer_total_epochs=${TRAINER_TOTAL_EPOCHS:-10}
-trainer_total_training_steps=${TRAINER_TOTAL_TRAINING_STEPS:-}
-trainer_resume_mode=${TRAINER_RESUME_MODE:-auto}
 
-export VERL_LOGGING_LEVEL=INFO
-export TORCHDYNAMO_DISABLE=1
-export TORCH_NCCL_AVOID_RECORD_STREAMS=1
-export VERL_SET_TRITON_TORCH_ALLOCATOR=1
-export WANDB_API_KEY=${WANDB_API_KEY:?WANDB_API_KEY must be set}
+train_tp=4
+train_pp=1
+train_ep=8
+train_etp=1
+train_cp=1
 
 ################################################### start of config ###################################################
 
@@ -119,7 +110,6 @@ ALGORITHM=(
 PERF_OPT=(
     actor_rollout_ref.model.enable_gradient_checkpointing=True
     actor_rollout_ref.model.use_remove_padding=True
-
     +actor_rollout_ref.actor.optim.override_optimizer_config.overlap_cpu_optimizer_d2h_h2d=True
     +actor_rollout_ref.actor.optim.override_optimizer_config.use_precision_aware_optimizer=True
     +actor_rollout_ref.actor.optim.override_optimizer_config.optimizer_cpu_offload=False
@@ -155,11 +145,11 @@ ACTOR=(
     +actor_rollout_ref.actor.megatron.override_transformer_config.moe_permute_fusion=False
     actor_rollout_ref.actor.megatron.override_transformer_config.attention_backend='fused'
     actor_rollout_ref.actor.loss_agg_mode=${loss_agg_mode}
-    actor_rollout_ref.actor.megatron.tensor_model_parallel_size=4
-    actor_rollout_ref.actor.megatron.pipeline_model_parallel_size=1
-    actor_rollout_ref.actor.megatron.expert_model_parallel_size=8
-    actor_rollout_ref.actor.megatron.expert_tensor_parallel_size=1
-    actor_rollout_ref.actor.megatron.context_parallel_size=1
+    actor_rollout_ref.actor.megatron.tensor_model_parallel_size=${train_tp}
+    actor_rollout_ref.actor.megatron.pipeline_model_parallel_size=${train_pp}
+    actor_rollout_ref.actor.megatron.expert_model_parallel_size=${train_ep}
+    actor_rollout_ref.actor.megatron.expert_tensor_parallel_size=${train_etp}
+    actor_rollout_ref.actor.megatron.context_parallel_size=${train_cp}
 )
 
 ROLLOUT=(
@@ -168,7 +158,7 @@ ROLLOUT=(
     actor_rollout_ref.rollout.gpu_memory_utilization=0.6
     actor_rollout_ref.rollout.tensor_model_parallel_size=${gen_tp}
     actor_rollout_ref.rollout.enable_chunked_prefill=True
-    actor_rollout_ref.rollout.max_num_batched_tokens=${rollout_max_num_batched_tokens}
+    actor_rollout_ref.rollout.max_num_batched_tokens=$(( 1024 * 32 ))
     actor_rollout_ref.rollout.temperature=${temperature}
     actor_rollout_ref.rollout.top_p=${top_p}
     actor_rollout_ref.rollout.top_k=${top_k}
@@ -178,8 +168,7 @@ ROLLOUT=(
     actor_rollout_ref.rollout.val_kwargs.do_sample=True
     actor_rollout_ref.rollout.val_kwargs.n=1
     actor_rollout_ref.rollout.name=${rollout_name}
-    actor_rollout_ref.rollout.enforce_eager=${rollout_enforce_eager}
-    +actor_rollout_ref.rollout.engine_kwargs.sglang.moe_runner_backend=triton
+    actor_rollout_ref.rollout.enforce_eager=False
 )
 
 FORWARD_ONLY_SETS=(
@@ -189,11 +178,11 @@ FORWARD_ONLY_SETS=(
     actor_rollout_ref.rollout.log_prob_max_token_len_per_gpu=${infer_ppo_max_token_len}
     actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=2
     actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu=2
-    actor_rollout_ref.ref.megatron.tensor_model_parallel_size=4
-    actor_rollout_ref.ref.megatron.pipeline_model_parallel_size=1
-    actor_rollout_ref.ref.megatron.expert_model_parallel_size=8
-    actor_rollout_ref.ref.megatron.expert_tensor_parallel_size=1
-    actor_rollout_ref.ref.megatron.context_parallel_size=1
+    actor_rollout_ref.ref.megatron.tensor_model_parallel_size=${train_tp}
+    actor_rollout_ref.ref.megatron.pipeline_model_parallel_size=${train_pp}
+    actor_rollout_ref.ref.megatron.expert_model_parallel_size=${train_ep}
+    actor_rollout_ref.ref.megatron.expert_tensor_parallel_size=${train_etp}
+    actor_rollout_ref.ref.megatron.context_parallel_size=${train_cp}
 )
 
 MODEL=(
@@ -209,23 +198,20 @@ REWARD_MODEL=(
 )
 
 TRAINER=(
-    trainer.logger="${trainer_logger}"
+    trainer.logger='["console","wandb"]'
     trainer.project_name="${project_name}"
     trainer.experiment_name="${exp_name}"
     trainer.n_gpus_per_node=8
     trainer.nnodes="${NNODES}"
-    trainer.val_before_train=${trainer_val_before_train}
-    trainer.test_freq=${trainer_test_freq}
-    trainer.save_freq=${trainer_save_freq}
+    trainer.val_before_train=False
+    trainer.test_freq=10
+    trainer.save_freq=5
     trainer.max_actor_ckpt_to_keep=5
-    trainer.total_epochs=${trainer_total_epochs}
+    trainer.total_epochs=10
     trainer.default_local_dir="${CKPTS_DIR}"
-    trainer.resume_mode=${trainer_resume_mode}
+    trainer.resume_mode=auto
+    trainer.total_training_steps=500
 )
-
-if [ -n "${trainer_total_training_steps}" ]; then
-    TRAINER+=(trainer.total_training_steps=${trainer_total_training_steps})
-fi
 
 ################################################### start script ###################################################
 python3 -m recipe.dapo.main_dapo \
@@ -241,4 +227,3 @@ python3 -m recipe.dapo.main_dapo \
     "${FORWARD_ONLY_SETS[@]}" \
     "${REWARD_MODEL[@]}" \
     "${TRAINER[@]}"
-
